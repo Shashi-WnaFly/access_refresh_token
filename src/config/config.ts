@@ -6,8 +6,10 @@ if (
   !process.env.SENDER_EMAIL
 )
   throw new Error("Email envs are not available.");
+if (!process.env.PORT) throw new Error("Server's port is not available.");
 
 const config = {
+  PORT: process.env.PORT,
   MONGO_URI: process.env.MONGO_URI,
   JWT_SECRET: process.env.JWT_SECRET,
   BREVO_SMTP_USER: process.env.BREVO_SMTP_USER,
