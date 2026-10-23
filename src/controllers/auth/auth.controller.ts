@@ -11,6 +11,7 @@ import {
   createRefreshToken,
   verifyRefreshToken,
 } from "../../lib/token.js";
+import crypto from "crypto";
 
 function getAppUrl() {
   return config.APP_URL || `http://localhost:${config.PORT}`;
@@ -267,6 +268,71 @@ export async function refreshHandler(req: Request, res: Response) {
         role: user.role,
         twoFactorEnabled: user.twoFactorEnabled,
       },
+    });
+  } catch (error) {
+    console.log("Error: ", (error as Error).message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+
+export function logoutHandler(_req: Request, res: Response) {
+  res.clearCookie("refreshToken", { path: "/" });
+  res.status(200).json({
+    success: true,
+    message: "Logged out",
+  });
+}
+
+export async function resetPasswordHandler(req: Request, res: Response) {
+  const { email } = req.body as { email: string };
+  const normalizeEmail = email.trim().toLowerCase();
+
+  if (!normalizeEmail) {
+    return res.status(400).json({
+      success: true,
+      message: "Email is missing or invalid!",
+    });
+  }
+
+  try {
+    const user = await userModel.findOne({ email });
+
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        message:
+          "If an account with this email exists, we will send you a reset link",
+      });
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(rawToken)
+      .digest("hex");
+
+    const resetLink = `${getAppUrl()}/api/auth/reset-password?token=${rawToken}`;
+
+    user.resetPasswordToken = tokenHash;
+    user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await user.save();
+
+    await SendEmail(
+      email,
+      "Reset your password",
+      `
+      <p>You requested password reset. Click on the below link to reset the password</p>
+      <p><a href="${resetLink}">${resetLink}</a></p>`,
+    );
+
+    res.status(200).json({
+      success: true,
+      message:
+        "If an account with this email exists, we will send you a reset link",
     });
   } catch (error) {
     console.log("Error: ", (error as Error).message);
