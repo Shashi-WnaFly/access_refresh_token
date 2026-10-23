@@ -1,15 +1,15 @@
 import type { Request, Response } from "express";
 import userModel from "../../models/user.js";
-import { success, z } from "zod";
+import { z } from "zod";
 import jwt from "jsonwebtoken";
-import { registerSchema } from "./auth.schema.js";
-import { passwordHash } from "../../lib/hash.js";
+import { loginSchema, registerSchema } from "./auth.schema.js";
+import { compareHash, passwordHash } from "../../lib/hash.js";
 import { SendEmail } from "../../lib/email.js";
 import config from "../../config/config.js";
+import { createAccessToken, createRefreshToken } from "../../lib/token.js";
 
 function getAppUrl() {
-  // TODO: add app url
-  return "" || `http://localhost:${config.PORT}`;
+  return config.APP_URL || `http://localhost:${config.PORT}`;
 }
 
 export async function registerHandler(req: Request, res: Response) {
@@ -119,6 +119,82 @@ export async function verifyEmailHandler(req: Request, res: Response) {
     res.status(200).json({
       success: true,
       message: "Email is now verified! you can login",
+    });
+  } catch (error) {
+    console.log("Error: ", (error as Error).message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+
+export async function loginHandler(req: Request, res: Response) {
+  try {
+    const result = loginSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid data! error: ${z.flattenError(result.error)}`,
+      });
+    }
+
+    const { email, password } = result.data;
+
+    const user = await userModel.findOne({ email });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: `Credentials are invalid!`,
+      });
+    }
+
+    if (!user.isEmailVerified) {
+      return res.status(400).json({
+        success: false,
+        message: `Verify your email first then try loggin in...`,
+      });
+    }
+
+    if (!compareHash(password, user.passwordHash)) {
+      return res.status(400).json({
+        success: false,
+        message: `Credentials are invalid!`,
+      });
+    }
+
+    const accessToken = createAccessToken(
+      user._id.toString(),
+      user.role,
+      user.tokenVersion,
+    );
+
+    const refreshToken = createRefreshToken(
+      user._id.toString(),
+      user.tokenVersion,
+    );
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: config.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "User logged in successfully",
+      accessToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        isEmailVerified: user.isEmailVerified,
+        name: user.name,
+        role: user.role,
+        twoFactorEnabled: user.twoFactorEnabled,
+      },
     });
   } catch (error) {
     console.log("Error: ", (error as Error).message);
