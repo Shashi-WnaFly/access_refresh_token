@@ -1,12 +1,16 @@
 import type { Request, Response } from "express";
 import userModel from "../../models/user.js";
-import { z } from "zod";
+import { success, z } from "zod";
 import jwt from "jsonwebtoken";
 import { loginSchema, registerSchema } from "./auth.schema.js";
 import { compareHash, passwordHash } from "../../lib/hash.js";
 import { SendEmail } from "../../lib/email.js";
 import config from "../../config/config.js";
-import { createAccessToken, createRefreshToken } from "../../lib/token.js";
+import {
+  createAccessToken,
+  createRefreshToken,
+  verifyRefreshToken,
+} from "../../lib/token.js";
 
 function getAppUrl() {
   return config.APP_URL || `http://localhost:${config.PORT}`;
@@ -15,14 +19,14 @@ function getAppUrl() {
 export async function registerHandler(req: Request, res: Response) {
   try {
     const result = registerSchema.safeParse(req.body);
-    
+
     if (!result.success) {
       return res.status(400).json({
         success: false,
         message: `Invalid data! error: ${z.flattenError(result.error)}`,
       });
     }
-    
+
     const { name, email, password } = result.data;
 
     const isUserExists = await userModel.findOne({ email });
@@ -100,7 +104,7 @@ export async function verifyEmailHandler(req: Request, res: Response) {
     const user = await userModel.findById(payload.sub);
 
     if (!user) {
-      return res.status(400).json({
+      return res.status(401).json({
         success: false,
         message: "User not found!",
       });
@@ -187,6 +191,74 @@ export async function loginHandler(req: Request, res: Response) {
       success: true,
       message: "User logged in successfully",
       accessToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        isEmailVerified: user.isEmailVerified,
+        name: user.name,
+        role: user.role,
+        twoFactorEnabled: user.twoFactorEnabled,
+      },
+    });
+  } catch (error) {
+    console.log("Error: ", (error as Error).message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+
+export async function refreshHandler(req: Request, res: Response) {
+  try {
+    const token = req.cookies?.refreshToken;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token is missing",
+      });
+    }
+
+    const payload = verifyRefreshToken(token);
+
+    if (!payload) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token is invalid!",
+      });
+    }
+
+    const user = await userModel.findById(payload.sub);
+
+    if (!user || user.tokenVersion !== payload.tokenVersion) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token is invalidated!",
+      });
+    }
+
+    const newAccessToken = createAccessToken(
+      user._id.toString(),
+      user.role,
+      user.tokenVersion,
+    );
+    const newRefreshToken = createRefreshToken(
+      user._id.toString(),
+      user.tokenVersion,
+    );
+
+    res.cookie("refreshToken", newRefreshToken, {
+      httpOnly: true,
+      secure: config.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Token refreshed",
+      accessToken: newAccessToken,
       user: {
         id: user._id,
         email: user.email,

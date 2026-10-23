@@ -14,3 +14,10 @@ export function createRefreshToken(userId: string, tokenVersion: number) {
   const payload = { sub: userId, tokenVersion };
   return jwt.sign(payload, config.JWT_SECRET, { expiresIn: "7d" });
 }
+
+export function verifyRefreshToken(token: string) {
+  return jwt.verify(token, config.JWT_SECRET) as {
+    sub: string;
+    tokenVersion: number;
+  };
+}
