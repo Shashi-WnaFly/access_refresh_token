@@ -15,14 +15,14 @@ function getAppUrl() {
 export async function registerHandler(req: Request, res: Response) {
   try {
     const result = registerSchema.safeParse(req.body);
-
+    
     if (!result.success) {
       return res.status(400).json({
         success: false,
         message: `Invalid data! error: ${z.flattenError(result.error)}`,
       });
     }
-
+    
     const { name, email, password } = result.data;
 
     const isUserExists = await userModel.findOne({ email });
@@ -48,7 +48,7 @@ export async function registerHandler(req: Request, res: Response) {
       { expiresIn: "1d" },
     );
 
-    const verifyUrl = `${getAppUrl}/auth/verify-email?token=${verifyToken}`;
+    const verifyUrl = `${getAppUrl()}/api/auth/verify-email?token=${verifyToken}`;
 
     await SendEmail(
       savedUser.email,
